@@ -1,32 +1,28 @@
+
 package br.com.intercambiolivros.controller;
 
-import br.com.intercambiolivros.config.GsonConfig;
 import br.com.intercambiolivros.model.Livro;
 import br.com.intercambiolivros.model.Troca;
 import br.com.intercambiolivros.service.TrocaService;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
+import com.google.gson.annotations.SerializedName;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
-import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 @WebServlet("/api/trocas/*")
-public class TrocaController extends HttpServlet {
+public class TrocaController extends BaseController {
 
     private final TrocaService trocaService =
             new TrocaService();
-
-    private final Gson gson =
-            GsonConfig.getGson();
 
     @Override
     protected void doGet(
@@ -34,124 +30,129 @@ public class TrocaController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
-        String pathInfo = req.getPathInfo();
-
         Long usuarioId =
                 (Long) req.getAttribute("usuarioId");
 
         try {
 
+            String pathInfo = req.getPathInfo();
+
+            // GET /api/trocas
             if (pathInfo == null
                     || pathInfo.equals("/")
                     || pathInfo.isEmpty()) {
 
                 List<Troca> trocas =
-                        this.trocaService.listarPorUsuario(
-                                usuarioId);
+                        trocaService.listarPorUsuario(usuarioId);
 
-                this.responderJson(
+                responderJson(
                         resp,
                         HttpServletResponse.SC_OK,
-                        this.converterLista(trocas));
+                        converterLista(trocas, TrocaResponse::new)
+                );
 
                 return;
             }
 
+            // GET /api/trocas/pendentes
             if (pathInfo.equals("/pendentes")) {
 
                 List<Troca> trocas =
-                        this.trocaService.listarPendentesPorUsuario(
-                                usuarioId);
+                        trocaService.listarPendentesPorUsuario(
+                                usuarioId
+                        );
 
-                this.responderJson(
+                responderJson(
                         resp,
                         HttpServletResponse.SC_OK,
-                        this.converterLista(trocas));
+                        converterLista(trocas, TrocaResponse::new)
+                );
 
                 return;
             }
 
+            // GET /api/trocas/concluidas
             if (pathInfo.equals("/concluidas")) {
 
                 List<Troca> trocas =
-                        this.trocaService.listarConcluidasPorUsuario(
-                                usuarioId);
+                        trocaService.listarConcluidasPorUsuario(
+                                usuarioId
+                        );
 
-                this.responderJson(
+                responderJson(
                         resp,
                         HttpServletResponse.SC_OK,
-                        this.converterLista(trocas));
+                        converterLista(trocas, TrocaResponse::new)
+                );
 
                 return;
             }
 
-            String[] partes =
-                    pathInfo.substring(1).split("/");
+            // GET /api/trocas/{id}
+            String[] partes = obterPartesCaminho(req);
 
             if (partes.length != 1) {
-                this.erro(
+                erro(
                         resp,
                         HttpServletResponse.SC_NOT_FOUND,
-                        "Rota nao encontrada.");
+                        "Rota nao encontrada."
+                );
 
                 return;
             }
 
-            Long id = this.obterId(partes[0]);
+            Long id = obterId(partes[0]);
 
             if (id == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Id da troca invalido.");
-
-                return;
+                throw new IllegalArgumentException(
+                        "Id da troca invalido."
+                );
             }
 
             Troca troca =
-                    this.trocaService.buscarPorId(id);
+                    trocaService.buscarPorId(id, usuarioId);
 
-            if (troca == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_NOT_FOUND,
-                        "Troca nao encontrada.");
-
-                return;
-            }
-
-            if (!this.participaDaTroca(
-                    troca,
-                    usuarioId)) {
-
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_FORBIDDEN,
-                        "Voce nao participa desta troca.");
-
-                return;
-            }
-
-            this.responderJson(
+            responderJson(
                     resp,
                     HttpServletResponse.SC_OK,
-                    new TrocaResponse(troca));
+                    new TrocaResponse(troca)
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao consultar trocas.");
+                    "Erro ao consultar trocas."
+            );
         }
     }
 
@@ -161,74 +162,100 @@ public class TrocaController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
+        // POST /api/trocas
         String pathInfo = req.getPathInfo();
 
         if (pathInfo != null
                 && !pathInfo.equals("/")
                 && !pathInfo.isEmpty()) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_NOT_FOUND,
-                    "Rota nao encontrada.");
+                    "Rota nao encontrada."
+            );
 
             return;
         }
 
+        Long usuarioId =
+                (Long) req.getAttribute("usuarioId");
+
         try {
 
             SolicitarTrocaRequest dados =
-                    this.gson.fromJson(
+                    gson.fromJson(
                             req.getReader(),
-                            SolicitarTrocaRequest.class);
+                            SolicitarTrocaRequest.class
+                    );
 
-            if (dados == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Dados da troca sao obrigatorios.");
-
-                return;
-            }
-
-            Long usuarioId =
-                    (Long) req.getAttribute("usuarioId");
-
-            this.trocaService.solicitar(
+            trocaService.solicitar(
                     usuarioId,
-                    dados.livroOferecidoId,
-                    dados.livroRecebidoId,
-                    dados.mensagem);
+                    dados == null ? null : dados.livroOferecidoId,
+                    dados == null ? null : dados.livroRecebidoId,
+                    dados == null ? null : dados.mensagem
+            );
 
-            this.responderJson(
+            responderJson(
                     resp,
                     HttpServletResponse.SC_CREATED,
                     Map.of(
                             "mensagem",
-                            "Troca solicitada com sucesso."));
+                            "Troca solicitada com sucesso."
+                    )
+            );
 
         } catch (JsonParseException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    "JSON invalido.");
+                    "JSON invalido."
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
+
+        } catch (IllegalStateException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_CONFLICT,
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao solicitar troca.");
+                    "Erro ao solicitar troca."
+            );
         }
     }
 
@@ -238,264 +265,140 @@ public class TrocaController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
-        String pathInfo = req.getPathInfo();
+        Long usuarioId =
+                (Long) req.getAttribute("usuarioId");
 
         try {
 
-            if (pathInfo == null
-                    || pathInfo.isEmpty()
-                    || pathInfo.equals("/")) {
-
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_NOT_FOUND,
-                        "Rota nao encontrada.");
-
-                return;
-            }
-
-            String[] partes =
-                    pathInfo.substring(1).split("/");
+            // PUT /api/trocas/{id}/{acao}
+            String[] partes = obterPartesCaminho(req);
 
             if (partes.length != 2) {
-                this.erro(
+                erro(
                         resp,
                         HttpServletResponse.SC_NOT_FOUND,
-                        "Rota nao encontrada.");
+                        "Rota nao encontrada."
+                );
 
                 return;
             }
 
-            Long trocaId =
-                    this.obterId(partes[0]);
+            Long trocaId = obterId(partes[0]);
 
             if (trocaId == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Id da troca invalido.");
-
-                return;
-            }
-
-            Long usuarioId =
-                    (Long) req.getAttribute("usuarioId");
-
-            Troca troca =
-                    this.trocaService.buscarPorId(trocaId);
-
-            if (troca == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_NOT_FOUND,
-                        "Troca nao encontrada.");
-
-                return;
+                throw new IllegalArgumentException(
+                        "Id da troca invalido."
+                );
             }
 
             String acao = partes[1];
+            String mensagem;
 
             switch (acao) {
 
                 case "aceitar":
 
-                    if (!this.eDonoDoLivroRecebido(
-                            troca,
-                            usuarioId)) {
-
-                        this.erro(
-                                resp,
-                                HttpServletResponse.SC_FORBIDDEN,
-                                "Voce nao pode responder esta troca.");
-
-                        return;
-                    }
-
-                    this.trocaService.aceitar(
+                    trocaService.aceitar(
                             trocaId,
-                            usuarioId);
+                            usuarioId
+                    );
 
-                    this.responderJson(
-                            resp,
-                            HttpServletResponse.SC_OK,
-                            Map.of(
-                                    "mensagem",
-                                    "Troca aceita com sucesso."));
-
+                    mensagem = "Troca aceita com sucesso.";
                     break;
 
                 case "recusar":
 
-                    if (!this.eDonoDoLivroRecebido(
-                            troca,
-                            usuarioId)) {
-
-                        this.erro(
-                                resp,
-                                HttpServletResponse.SC_FORBIDDEN,
-                                "Voce nao pode responder esta troca.");
-
-                        return;
-                    }
-
-                    this.trocaService.recusar(
+                    trocaService.recusar(
                             trocaId,
-                            usuarioId);
+                            usuarioId
+                    );
 
-                    this.responderJson(
-                            resp,
-                            HttpServletResponse.SC_OK,
-                            Map.of(
-                                    "mensagem",
-                                    "Troca recusada com sucesso."));
-
+                    mensagem = "Troca recusada com sucesso.";
                     break;
 
                 case "concluir":
 
-                    if (!this.participaDaTroca(
-                            troca,
-                            usuarioId)) {
-
-                        this.erro(
-                                resp,
-                                HttpServletResponse.SC_FORBIDDEN,
-                                "Voce nao participa desta troca.");
-
-                        return;
-                    }
-
-                    this.trocaService.concluir(
+                    trocaService.concluir(
                             trocaId,
-                            usuarioId);
+                            usuarioId
+                    );
 
-                    this.responderJson(
-                            resp,
-                            HttpServletResponse.SC_OK,
-                            Map.of(
-                                    "mensagem",
-                                    "Troca concluida com sucesso."));
-
+                    mensagem = "Troca concluida com sucesso.";
                     break;
 
                 default:
 
-                    this.erro(
+                    erro(
                             resp,
                             HttpServletResponse.SC_NOT_FOUND,
-                            "Acao nao encontrada.");
+                            "Acao nao encontrada."
+                    );
+
+                    return;
             }
+
+            responderJson(
+                    resp,
+                    HttpServletResponse.SC_OK,
+                    Map.of("mensagem", mensagem)
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
+
+        } catch (IllegalStateException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_CONFLICT,
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao atualizar troca.");
+                    "Erro ao atualizar troca."
+            );
         }
     }
 
-    private boolean participaDaTroca(
-            Troca troca,
-            Long usuarioId) {
-
-        if (usuarioId == null) {
-            return false;
-        }
-
-        Livro oferecido =
-                troca.getLivroOferecido();
-
-        Livro recebido =
-                troca.getLivroRecebido();
-
-        return (oferecido != null
-                && usuarioId.equals(
-                        oferecido.getUsuarioId()))
-                ||
-                (recebido != null
-                && usuarioId.equals(
-                        recebido.getUsuarioId()));
-    }
-
-    private boolean eDonoDoLivroRecebido(
-            Troca troca,
-            Long usuarioId) {
-
-        if (usuarioId == null
-                || troca.getLivroRecebido() == null) {
-
-            return false;
-        }
-
-        return usuarioId.equals(
-                troca.getLivroRecebido().getUsuarioId());
-    }
-
-    private Long obterId(String valor) {
-
-        try {
-            return Long.valueOf(valor);
-
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private List<TrocaResponse> converterLista(
-            List<Troca> trocas) {
-
-        List<TrocaResponse> resposta =
-                new ArrayList<>();
-
-        for (Troca troca : trocas) {
-            resposta.add(new TrocaResponse(troca));
-        }
-
-        return resposta;
-    }
-
-    private void responderJson(
-            HttpServletResponse resp,
-            int status,
-            Object dados) throws IOException {
-
-        resp.setStatus(status);
-        resp.setContentType("application/json");
-        resp.setCharacterEncoding("UTF-8");
-
-        resp.getWriter().write(
-                this.gson.toJson(dados));
-    }
-
-    private void erro(
-            HttpServletResponse resp,
-            int status,
-            String mensagem) throws IOException {
-
-        this.responderJson(
-                resp,
-                status,
-                Map.of("erro", mensagem));
-    }
-
-    private static class SolicitarTrocaRequest {
+        // DTO de entrada.
+        private static class SolicitarTrocaRequest {
 
         private Long livroOferecidoId;
         private Long livroRecebidoId;
         private String mensagem;
-    }
+        }
 
-    private static class TrocaResponse {
+        // DTO de saída.
+        private static class TrocaResponse {
 
         private Long id;
         private Long livroOferecidoId;
@@ -508,32 +411,35 @@ public class TrocaController extends HttpServlet {
 
         public TrocaResponse(Troca troca) {
 
-            this.id = troca.getId();
+                this.id = troca.getId();
 
-            this.livroOferecidoId =
-                    troca.getLivroOferecidoId();
+                this.livroOferecidoId =
+                        troca.getLivroOferecidoId();
 
-            this.livroRecebidoId =
-                    troca.getLivroRecebidoId();
+                this.livroRecebidoId =
+                        troca.getLivroRecebidoId();
 
-            this.status = troca.getStatus();
-            this.mensagem = troca.getMensagem();
+                this.status = troca.getStatus();
+                this.mensagem = troca.getMensagem();
 
-            if (troca.getLivroOferecido() != null) {
+                if (troca.getLivroOferecido() != null) {
                 this.livroOferecido =
                         new LivroResponse(
-                                troca.getLivroOferecido());
-            }
+                                troca.getLivroOferecido()
+                        );
+                }
 
-            if (troca.getLivroRecebido() != null) {
+                if (troca.getLivroRecebido() != null) {
                 this.livroRecebido =
                         new LivroResponse(
-                                troca.getLivroRecebido());
-            }
+                                troca.getLivroRecebido()
+                        );
+                }
         }
-    }
+        }
 
-    private static class LivroResponse {
+        // DTO resumido do livro dentro da troca.
+     private static class LivroResponse {
 
         private Long id;
         private String titulo;

@@ -1,42 +1,32 @@
 
 package br.com.intercambiolivros.controller;
 
-import br.com.intercambiolivros.config.GsonConfig;
 import br.com.intercambiolivros.model.Usuario;
 import br.com.intercambiolivros.service.UsuarioService;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
-import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 @WebServlet("/api/usuarios/*")
-public class UsuarioController extends HttpServlet {
-
-    private static final Long PERFIL_ADMIN_ID = 1L;
+public class UsuarioController extends BaseController {
 
     private final UsuarioService usuarioService =
             new UsuarioService();
-
-    private final Gson gson =
-            GsonConfig.getGson();
 
     @Override
     protected void doGet(
             HttpServletRequest req,
             HttpServletResponse resp)
             throws ServletException, IOException {
-
-        String pathInfo = req.getPathInfo();
 
         Long usuarioId =
                 (Long) req.getAttribute("usuarioId");
@@ -46,77 +36,94 @@ public class UsuarioController extends HttpServlet {
 
         try {
 
+            String pathInfo = req.getPathInfo();
+
+            // GET /api/usuarios
             if (pathInfo == null
                     || pathInfo.equals("/")
                     || pathInfo.isEmpty()) {
 
-                if (!this.eAdministrador(perfilId)) {
-                    this.erro(
-                            resp,
-                            HttpServletResponse.SC_FORBIDDEN,
-                            "Apenas administradores podem listar usuarios.");
-
-                    return;
-                }
-
                 List<Usuario> usuarios =
-                        this.usuarioService.listar();
+                        usuarioService.listar(
+                                usuarioId,
+                                perfilId
+                        );
 
-                this.responderJson(
+                responderJson(
                         resp,
                         HttpServletResponse.SC_OK,
-                        this.converterLista(usuarios));
+                        converterLista(
+                                usuarios,
+                                UsuarioResponse::new
+                        )
+                );
 
                 return;
             }
 
-            Long id = this.obterId(req);
+            // GET /api/usuarios/{id}
+            String[] partes = obterPartesCaminho(req);
 
-            if (id == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Id do usuario invalido.");
-
-                return;
-            }
-
-            if (!id.equals(usuarioId)
-                    && !this.eAdministrador(perfilId)) {
-
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_FORBIDDEN,
-                        "Voce nao pode consultar este usuario.");
-
-                return;
-            }
-
-            Usuario usuario =
-                    this.usuarioService.buscarPorId(id);
-
-            if (usuario == null) {
-                this.erro(
+            if (partes.length != 1) {
+                erro(
                         resp,
                         HttpServletResponse.SC_NOT_FOUND,
-                        "Usuario nao encontrado.");
+                        "Rota nao encontrada."
+                );
 
                 return;
             }
 
-            this.responderJson(
+            Long id = obterId(partes[0]);
+
+            Usuario usuario =
+                    usuarioService.buscarPorId(
+                            id,
+                            usuarioId,
+                            perfilId
+                    );
+
+            responderJson(
                     resp,
                     HttpServletResponse.SC_OK,
-                    new UsuarioResponse(usuario));
+                    new UsuarioResponse(usuario)
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null || perfilId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
+
+        } catch (IllegalArgumentException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_BAD_REQUEST,
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao consultar usuarios.");
+                    "Erro ao consultar usuarios."
+            );
         }
     }
 
@@ -126,13 +133,15 @@ public class UsuarioController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
+        // POST /api/usuarios/cadastro
         String pathInfo = req.getPathInfo();
 
         if (!"/cadastro".equals(pathInfo)) {
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_NOT_FOUND,
-                    "Rota nao encontrada.");
+                    "Rota nao encontrada."
+            );
 
             return;
         }
@@ -140,57 +149,60 @@ public class UsuarioController extends HttpServlet {
         try {
 
             UsuarioRequest dados =
-                    this.gson.fromJson(
+                    gson.fromJson(
                             req.getReader(),
-                            UsuarioRequest.class);
+                            UsuarioRequest.class
+                    );
 
-            if (dados == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Dados do usuario sao obrigatorios.");
+            Usuario usuario =
+                    dados == null
+                            ? null
+                            : dados.paraUsuario();
 
-                return;
-            }
+            usuarioService.cadastrarNormal(usuario);
 
-            Usuario usuario = new Usuario();
-
-            usuario.setNome(dados.nome);
-            usuario.setEmail(dados.email);
-            usuario.setLogin(dados.login);
-            usuario.setSenha(dados.senha);
-
-            this.usuarioService.cadastrarNormal(usuario);
-
-            this.responderJson(
+            responderJson(
                     resp,
                     HttpServletResponse.SC_CREATED,
                     Map.of(
                             "mensagem",
-                            "Usuario cadastrado com sucesso."));
+                            "Usuario cadastrado com sucesso."
+                    )
+            );
 
         } catch (JsonParseException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    "JSON invalido.");
+                    "JSON invalido."
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
+
+        } catch (IllegalStateException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_CONFLICT,
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao cadastrar usuario.");
+                    "Erro ao cadastrar usuario."
+            );
         }
     }
 
@@ -200,112 +212,110 @@ public class UsuarioController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
+        Long usuarioId =
+                (Long) req.getAttribute("usuarioId");
+
+        Long perfilId =
+                (Long) req.getAttribute("perfilId");
+
         try {
 
-            Long id = this.obterId(req);
+            // PUT /api/usuarios/{id}
+            String[] partes = obterPartesCaminho(req);
 
-            if (id == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Id do usuario invalido.");
-
-                return;
-            }
-
-            Long usuarioId =
-                    (Long) req.getAttribute("usuarioId");
-
-            Long perfilId =
-                    (Long) req.getAttribute("perfilId");
-
-            if (!id.equals(usuarioId)
-                    && !this.eAdministrador(perfilId)) {
-
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_FORBIDDEN,
-                        "Voce nao pode alterar este usuario.");
-
-                return;
-            }
-
-            Usuario existente =
-                    this.usuarioService.buscarPorId(id);
-
-            if (existente == null) {
-                this.erro(
+            if (partes.length != 1) {
+                erro(
                         resp,
                         HttpServletResponse.SC_NOT_FOUND,
-                        "Usuario nao encontrado.");
+                        "Rota nao encontrada."
+                );
 
                 return;
             }
+
+            Long id = obterId(partes[0]);
 
             UsuarioRequest dados =
-                    this.gson.fromJson(
+                    gson.fromJson(
                             req.getReader(),
-                            UsuarioRequest.class);
+                            UsuarioRequest.class
+                    );
 
-            if (dados == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Dados do usuario sao obrigatorios.");
+            Usuario usuario =
+                    dados == null
+                            ? null
+                            : dados.paraUsuario();
 
-                return;
+            if (usuario != null) {
+                usuario.setId(id);
             }
 
-            Usuario usuario = new Usuario();
+            usuarioService.atualizar(
+                    usuario,
+                    usuarioId,
+                    perfilId
+            );
 
-            usuario.setId(id);
-            usuario.setNome(dados.nome);
-            usuario.setEmail(dados.email);
-            usuario.setLogin(dados.login);
-            usuario.setSenha(dados.senha);
-
-            if (this.eAdministrador(perfilId)
-                    && dados.perfilId != null) {
-
-                usuario.setPerfilId(dados.perfilId);
-
-            } else {
-
-                usuario.setPerfilId(
-                        existente.getPerfilId());
-            }
-
-            this.usuarioService.salvar(usuario);
-
-            this.responderJson(
+            responderJson(
                     resp,
                     HttpServletResponse.SC_OK,
                     Map.of(
                             "mensagem",
-                            "Usuario atualizado com sucesso."));
+                            "Usuario atualizado com sucesso."
+                    )
+            );
 
         } catch (JsonParseException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    "JSON invalido.");
+                    "JSON invalido."
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null || perfilId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
+
+        } catch (IllegalStateException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_CONFLICT,
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao atualizar usuario.");
+                    "Erro ao atualizar usuario."
+            );
         }
     }
 
@@ -315,118 +325,80 @@ public class UsuarioController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
+        Long usuarioId =
+                (Long) req.getAttribute("usuarioId");
+
+        Long perfilId =
+                (Long) req.getAttribute("perfilId");
+
         try {
 
-            Long perfilId =
-                    (Long) req.getAttribute("perfilId");
+            // DELETE /api/usuarios/{id}
+            String[] partes = obterPartesCaminho(req);
 
-            if (!this.eAdministrador(perfilId)) {
-                this.erro(
+            if (partes.length != 1) {
+                erro(
                         resp,
-                        HttpServletResponse.SC_FORBIDDEN,
-                        "Apenas administradores podem excluir usuarios.");
+                        HttpServletResponse.SC_NOT_FOUND,
+                        "Rota nao encontrada."
+                );
 
                 return;
             }
 
-            Long id = this.obterId(req);
+            Long id = obterId(partes[0]);
 
-            if (id == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Id do usuario invalido.");
-
-                return;
-            }
-
-            this.usuarioService.deletar(id);
+            usuarioService.deletar(
+                    id,
+                    usuarioId,
+                    perfilId
+            );
 
             resp.setStatus(
-                    HttpServletResponse.SC_NO_CONTENT);
+                    HttpServletResponse.SC_NO_CONTENT
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null || perfilId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao excluir usuario.");
+                    "Erro ao excluir usuario."
+            );
         }
     }
 
-    private boolean eAdministrador(Long perfilId) {
-
-        return PERFIL_ADMIN_ID.equals(perfilId);
-    }
-
-    private Long obterId(HttpServletRequest req) {
-
-        String pathInfo = req.getPathInfo();
-
-        if (pathInfo == null
-                || pathInfo.length() <= 1) {
-            return null;
-        }
-
-        String valor = pathInfo.substring(1);
-
-        if (valor.contains("/")) {
-            return null;
-        }
-
-        try {
-            return Long.valueOf(valor);
-
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private List<UsuarioResponse> converterLista(
-            List<Usuario> usuarios) {
-
-        List<UsuarioResponse> resposta =
-                new ArrayList<>();
-
-        for (Usuario usuario : usuarios) {
-            resposta.add(new UsuarioResponse(usuario));
-        }
-
-        return resposta;
-    }
-
-    private void responderJson(
-            HttpServletResponse resp,
-            int status,
-            Object dados) throws IOException {
-
-        resp.setStatus(status);
-        resp.setContentType("application/json");
-        resp.setCharacterEncoding("UTF-8");
-
-        resp.getWriter().write(
-                this.gson.toJson(dados));
-    }
-
-    private void erro(
-            HttpServletResponse resp,
-            int status,
-            String mensagem) throws IOException {
-
-        this.responderJson(
-                resp,
-                status,
-                Map.of("erro", mensagem));
-    }
+    // -------------------------
+    // DTO de entrada
+    // -------------------------
 
     private static class UsuarioRequest {
 
@@ -435,7 +407,24 @@ public class UsuarioController extends HttpServlet {
         private String login;
         private String senha;
         private Long perfilId;
+
+        public Usuario paraUsuario() {
+
+            Usuario usuario = new Usuario();
+
+            usuario.setNome(nome);
+            usuario.setEmail(email);
+            usuario.setLogin(login);
+            usuario.setSenha(senha);
+            usuario.setPerfilId(perfilId);
+
+            return usuario;
+        }
     }
+
+    // -------------------------
+    // DTO de saída
+    // -------------------------
 
     private static class UsuarioResponse {
 

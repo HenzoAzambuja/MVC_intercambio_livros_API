@@ -22,6 +22,7 @@ br\com\intercambiolivros\config\JwtUtil.class
 br\com\intercambiolivros\controller\AuthController.class
 br\com\intercambiolivros\controller\UsuarioController$UsuarioResponse.class
 br\com\intercambiolivros\config\GsonConfig.class
+br\com\intercambiolivros\controller\BaseController.class
 br\com\intercambiolivros\model\Perfil.class
 br\com\intercambiolivros\controller\UsuarioController.class
 br\com\intercambiolivros\model\Usuario.class

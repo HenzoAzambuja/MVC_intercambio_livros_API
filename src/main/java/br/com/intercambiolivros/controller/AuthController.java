@@ -1,29 +1,24 @@
 
 package br.com.intercambiolivros.controller;
 
-import br.com.intercambiolivros.config.GsonConfig;
 import br.com.intercambiolivros.config.JwtUtil;
 import br.com.intercambiolivros.model.Usuario;
 import br.com.intercambiolivros.service.UsuarioService;
 
-import com.google.gson.Gson;
+import com.google.gson.JsonParseException;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
-import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 
 @WebServlet("/api/auth/login")
-public class AuthController extends HttpServlet {
+public class AuthController extends BaseController {
 
     private final UsuarioService usuarioService =
             new UsuarioService();
-
-    private final Gson gson =
-            GsonConfig.getGson();
 
     @Override
     protected void doPost(
@@ -31,52 +26,32 @@ public class AuthController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
-        resp.setContentType("application/json");
-        resp.setCharacterEncoding("UTF-8");
-
         try {
 
-            LoginRequest dados = this.gson.fromJson(
-                    req.getReader(),
-                    LoginRequest.class);
+            LoginRequest dados =
+                    gson.fromJson(
+                            req.getReader(),
+                            LoginRequest.class
+                    );
 
-            if (dados == null
-                    || dados.login == null
-                    || dados.senha == null
-                    || dados.login.isBlank()
-                    || dados.senha.isBlank()) {
+            // O Service será responsável por validar
+            // se login e senha foram informados.
+            String login = dados == null
+                    ? null
+                    : dados.login;
 
-                resp.setStatus(
-                        HttpServletResponse.SC_BAD_REQUEST);
+            String senha = dados == null
+                    ? null
+                    : dados.senha;
 
-                resp.getWriter().write(
-                        "{\"erro\":\"Login e senha sao obrigatorios.\"}");
+            Usuario usuario =
+                    usuarioService.autenticar(login, senha);
 
-                return;
-            }
-
-            Usuario usuario;
-
-            try {
-
-                usuario = this.usuarioService.autenticar(
-                        dados.login,
-                        dados.senha);
-
-            } catch (IllegalArgumentException e) {
-
-                resp.setStatus(
-                        HttpServletResponse.SC_UNAUTHORIZED);
-
-                resp.getWriter().write(
-                        "{\"erro\":\"Login ou senha invalidos.\"}");
-
-                return;
-            }
-
+            // Gera o token após autenticar o usuário.
             String token = JwtUtil.gerarToken(
                     usuario.getId(),
-                    usuario.getPerfilId());
+                    usuario.getPerfilId()
+            );
 
             LoginResponse resultado =
                     new LoginResponse();
@@ -86,19 +61,45 @@ public class AuthController extends HttpServlet {
             resultado.nome = usuario.getNome();
             resultado.perfilId = usuario.getPerfilId();
 
-            resp.setStatus(
-                    HttpServletResponse.SC_OK);
+            responderJson(
+                    resp,
+                    HttpServletResponse.SC_OK,
+                    resultado
+            );
 
-            resp.getWriter().write(
-                    this.gson.toJson(resultado));
+        } catch (JsonParseException e) {
 
-        } catch (com.google.gson.JsonParseException e) {
+            erro(
+                    resp,
+                    HttpServletResponse.SC_BAD_REQUEST,
+                    "JSON invalido."
+            );
 
-            resp.setStatus(
-                    HttpServletResponse.SC_BAD_REQUEST);
+        } catch (IllegalArgumentException e) {
 
-            resp.getWriter().write(
-                    "{\"erro\":\"JSON invalido.\"}");
+            erro(
+                    resp,
+                    HttpServletResponse.SC_BAD_REQUEST,
+                    e.getMessage()
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_UNAUTHORIZED,
+                    e.getMessage()
+            );
+
+        } catch (Exception e) {
+
+            e.printStackTrace();
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
+                    "Erro ao realizar login."
+            );
         }
     }
 

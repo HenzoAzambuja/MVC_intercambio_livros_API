@@ -1,31 +1,26 @@
 
 package br.com.intercambiolivros.controller;
 
-import br.com.intercambiolivros.config.GsonConfig;
 import br.com.intercambiolivros.model.Livro;
 import br.com.intercambiolivros.service.LivroService;
 
-import com.google.gson.Gson;
 import com.google.gson.JsonParseException;
 
 import jakarta.servlet.ServletException;
 import jakarta.servlet.annotation.WebServlet;
-import jakarta.servlet.http.HttpServlet;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.Map;
+import java.util.NoSuchElementException;
 
 @WebServlet("/api/livros/*")
-public class LivroController extends HttpServlet {
+public class LivroController extends BaseController {
 
     private final LivroService livroService =
             new LivroService();
-
-    private final Gson gson =
-            GsonConfig.getGson();
 
     @Override
     protected void doGet(
@@ -33,100 +28,128 @@ public class LivroController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
-        String pathInfo = req.getPathInfo();
-
         Long usuarioId =
                 (Long) req.getAttribute("usuarioId");
 
         try {
 
+            String pathInfo = req.getPathInfo();
+
+            // GET /api/livros
             if (pathInfo == null
                     || pathInfo.equals("/")
                     || pathInfo.isEmpty()) {
 
                 List<Livro> livros =
-                        this.livroService.listarDisponiveis(
-                                usuarioId);
+                        livroService.listarDisponiveis(usuarioId);
 
-                this.responderJson(
+                responderJson(
                         resp,
                         HttpServletResponse.SC_OK,
-                        livros);
+                        livros
+                );
 
                 return;
             }
 
+            // GET /api/livros/usuario
             if (pathInfo.equals("/usuario")) {
 
                 List<Livro> livros =
-                        this.livroService.listarPorUsuario(
-                                usuarioId);
+                        livroService.listarPorUsuario(usuarioId);
 
-                this.responderJson(
+                responderJson(
                         resp,
                         HttpServletResponse.SC_OK,
-                        livros);
+                        livros
+                );
 
                 return;
             }
 
+            // GET /api/livros/usuario/disponiveis
             if (pathInfo.equals("/usuario/disponiveis")) {
 
                 List<Livro> livros =
-                        this.livroService.listarDisponiveisPorUsuario(
-                                usuarioId);
+                        livroService.listarDisponiveisPorUsuario(
+                                usuarioId
+                        );
 
-                this.responderJson(
+                responderJson(
                         resp,
                         HttpServletResponse.SC_OK,
-                        livros);
+                        livros
+                );
 
                 return;
             }
 
-            Long id = this.obterId(req);
+            // GET /api/livros/{id}
+            String[] partes = obterPartesCaminho(req);
 
-            if (id == null) {
-                this.erro(
+            if (partes.length != 1) {
+
+                erro(
                         resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Id do livro invalido.");
+                        HttpServletResponse.SC_NOT_FOUND,
+                        "Rota nao encontrada."
+                );
 
                 return;
+            }
+
+            Long id = obterId(partes[0]);
+
+            if (id == null) {
+                throw new IllegalArgumentException(
+                        "Id do livro invalido."
+                );
             }
 
             Livro livro =
-                    this.livroService.buscarPorId(id);
+                    livroService.buscarPorId(id, usuarioId);
 
-            if (livro == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_NOT_FOUND,
-                        "Livro nao encontrado.");
-
-                return;
-            }
-
-            this.responderJson(
+            responderJson(
                     resp,
                     HttpServletResponse.SC_OK,
-                    livro);
+                    livro
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao consultar livros.");
+                    "Erro ao consultar livros."
+            );
         }
     }
 
@@ -136,16 +159,21 @@ public class LivroController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
+        Long usuarioId =
+                (Long) req.getAttribute("usuarioId");
+
+        // POST /api/livros
         String pathInfo = req.getPathInfo();
 
         if (pathInfo != null
                 && !pathInfo.equals("/")
                 && !pathInfo.isEmpty()) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_NOT_FOUND,
-                    "Rota nao encontrada.");
+                    "Rota nao encontrada."
+            );
 
             return;
         }
@@ -153,55 +181,57 @@ public class LivroController extends HttpServlet {
         try {
 
             Livro livro =
-                    this.gson.fromJson(
+                    gson.fromJson(
                             req.getReader(),
-                            Livro.class);
+                            Livro.class
+                    );
 
-            if (livro == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Dados do livro sao obrigatorios.");
+            livroService.salvar(livro, usuarioId);
 
-                return;
-            }
-
-            Long usuarioId =
-                    (Long) req.getAttribute("usuarioId");
-
-            this.livroService.salvar(
-                    livro,
-                    usuarioId);
-
-            this.responderJson(
+            responderJson(
                     resp,
                     HttpServletResponse.SC_CREATED,
                     Map.of(
                             "mensagem",
-                            "Livro cadastrado com sucesso."));
+                            "Livro cadastrado com sucesso."
+                    )
+            );
 
         } catch (JsonParseException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    "JSON invalido.");
+                    "JSON invalido."
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao cadastrar livro.");
+                    "Erro ao cadastrar livro."
+            );
         }
     }
 
@@ -211,114 +241,137 @@ public class LivroController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
-        String pathInfo = req.getPathInfo();
+        Long usuarioId =
+                (Long) req.getAttribute("usuarioId");
 
         try {
 
-            if (pathInfo == null
-                    || pathInfo.isEmpty()
-                    || pathInfo.equals("/")) {
+            String[] partes = obterPartesCaminho(req);
 
-                this.erro(
+            if (partes.length == 0) {
+
+                erro(
                         resp,
                         HttpServletResponse.SC_NOT_FOUND,
-                        "Rota nao encontrada.");
+                        "Rota nao encontrada."
+                );
 
                 return;
             }
 
-            String[] partes =
-                    pathInfo.substring(1).split("/");
-
-            Long id = this.obterId(partes[0]);
+            Long id = obterId(partes[0]);
 
             if (id == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Id do livro invalido.");
-
-                return;
+                throw new IllegalArgumentException(
+                        "Id do livro invalido."
+                );
             }
 
-            Long usuarioId =
-                    (Long) req.getAttribute("usuarioId");
-
+            // PUT /api/livros/{id}/disponibilidade
             if (partes.length == 2
                     && partes[1].equals("disponibilidade")) {
 
-                this.livroService.alterarDisponibilidade(
+                livroService.alterarDisponibilidade(
                         id,
-                        usuarioId);
+                        usuarioId
+                );
 
-                this.responderJson(
+                responderJson(
                         resp,
                         HttpServletResponse.SC_OK,
                         Map.of(
                                 "mensagem",
-                                "Disponibilidade alterada com sucesso."));
+                                "Disponibilidade alterada com sucesso."
+                        )
+                );
 
                 return;
             }
 
+            // PUT /api/livros/{id}
             if (partes.length != 1) {
-                this.erro(
+
+                erro(
                         resp,
                         HttpServletResponse.SC_NOT_FOUND,
-                        "Rota nao encontrada.");
+                        "Rota nao encontrada."
+                );
 
                 return;
             }
 
             Livro livro =
-                    this.gson.fromJson(
+                    gson.fromJson(
                             req.getReader(),
-                            Livro.class);
+                            Livro.class
+                    );
 
-            if (livro == null) {
-                this.erro(
-                        resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Dados do livro sao obrigatorios.");
-
-                return;
-            }
-
-            livro.setId(id);
-
-            this.livroService.salvar(
+            livroService.atualizar(
+                    id,
                     livro,
-                    usuarioId);
+                    usuarioId
+            );
 
-            this.responderJson(
+            responderJson(
                     resp,
                     HttpServletResponse.SC_OK,
                     Map.of(
                             "mensagem",
-                            "Livro atualizado com sucesso."));
+                            "Livro atualizado com sucesso."
+                    )
+            );
 
         } catch (JsonParseException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    "JSON invalido.");
+                    "JSON invalido."
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
+
+        } catch (IllegalStateException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_CONFLICT,
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao atualizar livro.");
+                    "Erro ao atualizar livro."
+            );
         }
     }
 
@@ -328,93 +381,82 @@ public class LivroController extends HttpServlet {
             HttpServletResponse resp)
             throws ServletException, IOException {
 
+        Long usuarioId =
+                (Long) req.getAttribute("usuarioId");
+
         try {
 
-            Long id = this.obterId(req);
+            String[] partes = obterPartesCaminho(req);
 
-            if (id == null) {
-                this.erro(
+            // DELETE /api/livros/{id}
+            if (partes.length != 1) {
+
+                erro(
                         resp,
-                        HttpServletResponse.SC_BAD_REQUEST,
-                        "Id do livro invalido.");
+                        HttpServletResponse.SC_NOT_FOUND,
+                        "Rota nao encontrada."
+                );
 
                 return;
             }
 
-            Long usuarioId =
-                    (Long) req.getAttribute("usuarioId");
+            Long id = obterId(partes[0]);
 
-            this.livroService.deletar(
-                    id,
-                    usuarioId);
+            if (id == null) {
+                throw new IllegalArgumentException(
+                        "Id do livro invalido."
+                );
+            }
+
+            livroService.deletar(id, usuarioId);
 
             resp.setStatus(
-                    HttpServletResponse.SC_NO_CONTENT);
+                    HttpServletResponse.SC_NO_CONTENT
+            );
+
+        } catch (SecurityException e) {
+
+            erro(
+                    resp,
+                    usuarioId == null
+                            ? HttpServletResponse.SC_UNAUTHORIZED
+                            : HttpServletResponse.SC_FORBIDDEN,
+                    e.getMessage()
+            );
+
+        } catch (NoSuchElementException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_NOT_FOUND,
+                    e.getMessage()
+            );
 
         } catch (IllegalArgumentException e) {
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_BAD_REQUEST,
-                    e.getMessage());
+                    e.getMessage()
+            );
+
+        } catch (IllegalStateException e) {
+
+            erro(
+                    resp,
+                    HttpServletResponse.SC_CONFLICT,
+                    e.getMessage()
+            );
 
         } catch (Exception e) {
 
             e.printStackTrace();
 
-            this.erro(
+            erro(
                     resp,
                     HttpServletResponse.SC_INTERNAL_SERVER_ERROR,
-                    "Erro ao excluir livro.");
+                    "Erro ao excluir livro."
+            );
         }
-    }
-
-    private Long obterId(HttpServletRequest req) {
-
-        String pathInfo = req.getPathInfo();
-
-        if (pathInfo == null
-                || pathInfo.length() <= 1) {
-            return null;
-        }
-
-        String[] partes =
-                pathInfo.substring(1).split("/");
-
-        return this.obterId(partes[0]);
-    }
-
-    private Long obterId(String valor) {
-
-        try {
-            return Long.valueOf(valor);
-
-        } catch (NumberFormatException e) {
-            return null;
-        }
-    }
-
-    private void responderJson(
-            HttpServletResponse resp,
-            int status,
-            Object dados) throws IOException {
-
-        resp.setStatus(status);
-        resp.setContentType("application/json");
-        resp.setCharacterEncoding("UTF-8");
-
-        resp.getWriter().write(
-                this.gson.toJson(dados));
-    }
-
-    private void erro(
-            HttpServletResponse resp,
-            int status,
-            String mensagem) throws IOException {
-
-        this.responderJson(
-                resp,
-                status,
-                Map.of("erro", mensagem));
     }
 }
