@@ -114,6 +114,21 @@ public class LivroService {
         this.livroDAO.alterar(livro);
     }
 
+    public void atualizar(Long id, Livro livro, Long usuarioId) {
+
+        if (id == null || id <= 0) {
+            throw new IllegalArgumentException("ID do livro inválido.");
+        }
+
+        if (livro == null) {
+            throw new IllegalArgumentException("Os dados do livro são obrigatórios.");
+        }
+
+        livro.setId(id);
+
+        salvar(livro, usuarioId);
+    }
+
     public void deletar(Long id, Long usuarioId) {
 
         this.validarId(id);
